@@ -89,7 +89,7 @@ func (ps *produceSet) buildRequest() *ProduceRequest {
 				// and sent as the payload of a single fake "message" with the appropriate codec
 				// set and no key. When the server sees a message with a compression codec, it
 				// decompresses the payload and treats the result as its message set.
-				payload, err := encode(set.setToSend, ps.parent.conf.MetricRegistry)
+				payload, err := encode(set.setToSend)
 				if err != nil {
 					Logger.Println(err) // if this happens, it's basically our fault.
 					panic(err)

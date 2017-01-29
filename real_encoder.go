@@ -2,15 +2,12 @@ package sarama
 
 import (
 	"encoding/binary"
-
-	"github.com/rcrowley/go-metrics"
 )
 
 type realEncoder struct {
-	raw      []byte
-	off      int
-	stack    []pushEncoder
-	registry metrics.Registry
+	raw   []byte
+	off   int
+	stack []pushEncoder
 }
 
 // primitives
@@ -121,9 +118,4 @@ func (re *realEncoder) pop() error {
 	re.stack = re.stack[:len(re.stack)-1]
 
 	return in.run(re.off, re.raw)
-}
-
-// we do record metrics during the real encoder pass
-func (re *realEncoder) metricRegistry() metrics.Registry {
-	return re.registry
 }

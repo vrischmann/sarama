@@ -11,8 +11,86 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rcrowley/go-metrics"
+	"github.com/prometheus/client_golang/prometheus"
 )
+
+var (
+	incomingByteCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: promNamespace,
+			Subsystem: "broker",
+			Name:      "incoming_byte",
+			Help:      "Incoming byte counter",
+		},
+		[]string{"broker"},
+	)
+	requestCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: promNamespace,
+			Subsystem: "broker",
+			Name:      "requests",
+			Help:      "Request counter",
+		},
+		[]string{"broker"},
+	)
+	requestSizeHisto = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: promNamespace,
+			Subsystem: "broker",
+			Name:      "request_size",
+			Help:      "Request size histogram",
+		},
+		[]string{"broker"},
+	)
+	requestLatencyHisto = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: promNamespace,
+			Subsystem: "broker",
+			Name:      "request_latency",
+			Help:      "Request latencu histogram",
+		},
+		[]string{"broker"},
+	)
+
+	outgoingByteCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: promNamespace,
+			Subsystem: "broker",
+			Name:      "outgoing_byte",
+			Help:      "Outgoing byte counter",
+		},
+		[]string{"broker"},
+	)
+
+	responseCounter = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: promNamespace,
+			Subsystem: "broker",
+			Name:      "responses",
+			Help:      "Response counter",
+		},
+		[]string{"broker"},
+	)
+	responseSizeHisto = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: promNamespace,
+			Subsystem: "broker",
+			Name:      "response_size",
+			Help:      "Response size histogram",
+		},
+		[]string{"broker"},
+	)
+)
+
+func init() {
+	prometheus.MustRegister(incomingByteCounter)
+	prometheus.MustRegister(requestCounter)
+	prometheus.MustRegister(requestSizeHisto)
+	prometheus.MustRegister(requestLatencyHisto)
+	prometheus.MustRegister(outgoingByteCounter)
+	prometheus.MustRegister(responseCounter)
+	prometheus.MustRegister(responseSizeHisto)
+}
 
 // Broker represents a single Kafka broker connection. All operations on this object are entirely concurrency-safe.
 type Broker struct {
@@ -28,21 +106,6 @@ type Broker struct {
 
 	responses chan responsePromise
 	done      chan bool
-
-	incomingByteRate       metrics.Meter
-	requestRate            metrics.Meter
-	requestSize            metrics.Histogram
-	requestLatency         metrics.Histogram
-	outgoingByteRate       metrics.Meter
-	responseRate           metrics.Meter
-	responseSize           metrics.Histogram
-	brokerIncomingByteRate metrics.Meter
-	brokerRequestRate      metrics.Meter
-	brokerRequestSize      metrics.Histogram
-	brokerRequestLatency   metrics.Histogram
-	brokerOutgoingByteRate metrics.Meter
-	brokerResponseRate     metrics.Meter
-	brokerResponseSize     metrics.Histogram
 }
 
 type responsePromise struct {
@@ -103,24 +166,6 @@ func (b *Broker) Open(conf *Config) error {
 		b.conf = conf
 
 		// Create or reuse the global metrics shared between brokers
-		b.incomingByteRate = metrics.GetOrRegisterMeter("incoming-byte-rate", conf.MetricRegistry)
-		b.requestRate = metrics.GetOrRegisterMeter("request-rate", conf.MetricRegistry)
-		b.requestSize = getOrRegisterHistogram("request-size", conf.MetricRegistry)
-		b.requestLatency = getOrRegisterHistogram("request-latency-in-ms", conf.MetricRegistry)
-		b.outgoingByteRate = metrics.GetOrRegisterMeter("outgoing-byte-rate", conf.MetricRegistry)
-		b.responseRate = metrics.GetOrRegisterMeter("response-rate", conf.MetricRegistry)
-		b.responseSize = getOrRegisterHistogram("response-size", conf.MetricRegistry)
-		// Do not gather metrics for seeded broker (only used during bootstrap) because they share
-		// the same id (-1) and are already exposed through the global metrics above
-		if b.id >= 0 {
-			b.brokerIncomingByteRate = getOrRegisterBrokerMeter("incoming-byte-rate", b, conf.MetricRegistry)
-			b.brokerRequestRate = getOrRegisterBrokerMeter("request-rate", b, conf.MetricRegistry)
-			b.brokerRequestSize = getOrRegisterBrokerHistogram("request-size", b, conf.MetricRegistry)
-			b.brokerRequestLatency = getOrRegisterBrokerHistogram("request-latency-in-ms", b, conf.MetricRegistry)
-			b.brokerOutgoingByteRate = getOrRegisterBrokerMeter("outgoing-byte-rate", b, conf.MetricRegistry)
-			b.brokerResponseRate = getOrRegisterBrokerMeter("response-rate", b, conf.MetricRegistry)
-			b.brokerResponseSize = getOrRegisterBrokerHistogram("response-size", b, conf.MetricRegistry)
-		}
 
 		if conf.Net.SASL.Enable {
 			b.connErr = b.sendAndReceiveSASLPlainAuth()
@@ -371,7 +416,7 @@ func (b *Broker) send(rb protocolBody, promiseResponse bool) (*responsePromise, 
 	}
 
 	req := &request{correlationID: b.correlationID, clientID: b.conf.ClientID, body: rb}
-	buf, err := encode(req, b.conf.MetricRegistry)
+	buf, err := encode(req)
 	if err != nil {
 		return nil, err
 	}
@@ -526,7 +571,7 @@ func (b *Broker) responseReceiver() {
 func (b *Broker) sendAndReceiveSASLPlainHandshake() error {
 	rb := &SaslHandshakeRequest{"PLAIN"}
 	req := &request{correlationID: b.correlationID, clientID: b.conf.ClientID, body: rb}
-	buf, err := encode(req, b.conf.MetricRegistry)
+	buf, err := encode(req)
 	if err != nil {
 		return err
 	}
@@ -634,41 +679,22 @@ func (b *Broker) sendAndReceiveSASLPlainAuth() error {
 
 func (b *Broker) updateIncomingCommunicationMetrics(bytes int, requestLatency time.Duration) {
 	b.updateRequestLatencyMetrics(requestLatency)
-	b.responseRate.Mark(1)
-	if b.brokerResponseRate != nil {
-		b.brokerResponseRate.Mark(1)
-	}
-	responseSize := int64(bytes)
-	b.incomingByteRate.Mark(responseSize)
-	if b.brokerIncomingByteRate != nil {
-		b.brokerIncomingByteRate.Mark(responseSize)
-	}
-	b.responseSize.Update(responseSize)
-	if b.brokerResponseSize != nil {
-		b.brokerResponseSize.Update(responseSize)
-	}
+	responseCounter.With(b.makePromLabels()).Inc()
+
+	responseSize := float64(bytes)
+	incomingByteCounter.With(b.makePromLabels()).Add(responseSize)
+	responseSizeHisto.With(b.makePromLabels()).Observe(responseSize)
 }
 
 func (b *Broker) updateRequestLatencyMetrics(requestLatency time.Duration) {
-	requestLatencyInMs := int64(requestLatency / time.Millisecond)
-	b.requestLatency.Update(requestLatencyInMs)
-	if b.brokerRequestLatency != nil {
-		b.brokerRequestLatency.Update(requestLatencyInMs)
-	}
+	requestLatencyInMus := float64(int64(requestLatency / time.Microsecond))
+	requestLatencyHisto.With(b.makePromLabels()).Observe(requestLatencyInMus)
 }
 
 func (b *Broker) updateOutgoingCommunicationMetrics(bytes int) {
-	b.requestRate.Mark(1)
-	if b.brokerRequestRate != nil {
-		b.brokerRequestRate.Mark(1)
-	}
-	requestSize := int64(bytes)
-	b.outgoingByteRate.Mark(requestSize)
-	if b.brokerOutgoingByteRate != nil {
-		b.brokerOutgoingByteRate.Mark(requestSize)
-	}
-	b.requestSize.Update(requestSize)
-	if b.brokerRequestSize != nil {
-		b.brokerRequestSize.Update(requestSize)
-	}
+	requestCounter.With(b.makePromLabels()).Inc()
+
+	requestSize := float64(bytes)
+	outgoingByteCounter.With(b.makePromLabels()).Add(requestSize)
+	requestSizeHisto.With(b.makePromLabels()).Observe(requestSize)
 }

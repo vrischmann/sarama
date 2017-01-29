@@ -215,7 +215,7 @@ func (b *MockBroker) handleRequests(conn net.Conn, idx int, wg *sync.WaitGroup) 
 		}
 		Logger.Printf("*** mockbroker/%d/%d: served %v -> %v", b.brokerID, idx, req, res)
 
-		encodedRes, err := encode(res, nil)
+		encodedRes, err := encode(res)
 		if err != nil {
 			b.serverError(err)
 			break

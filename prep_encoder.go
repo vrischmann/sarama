@@ -3,8 +3,6 @@ package sarama
 import (
 	"fmt"
 	"math"
-
-	"github.com/rcrowley/go-metrics"
 )
 
 type prepEncoder struct {
@@ -112,10 +110,5 @@ func (pe *prepEncoder) push(in pushEncoder) {
 }
 
 func (pe *prepEncoder) pop() error {
-	return nil
-}
-
-// we do not record metrics during the prep encoder pass
-func (pe *prepEncoder) metricRegistry() metrics.Registry {
 	return nil
 }

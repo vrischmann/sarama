@@ -2,8 +2,6 @@ package sarama
 
 import (
 	"fmt"
-
-	"github.com/rcrowley/go-metrics"
 )
 
 // Encoder is the interface that wraps the basic Encode method.
@@ -13,7 +11,7 @@ type encoder interface {
 }
 
 // Encode takes an Encoder and turns it into bytes while potentially recording metrics.
-func encode(e encoder, metricRegistry metrics.Registry) ([]byte, error) {
+func encode(e encoder) ([]byte, error) {
 	if e == nil {
 		return nil, nil
 	}
@@ -31,7 +29,6 @@ func encode(e encoder, metricRegistry metrics.Registry) ([]byte, error) {
 	}
 
 	realEnc.raw = make([]byte, prepEnc.length)
-	realEnc.registry = metricRegistry
 	err = e.encode(&realEnc)
 	if err != nil {
 		return nil, err

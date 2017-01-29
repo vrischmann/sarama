@@ -2,13 +2,11 @@ package sarama
 
 import (
 	"fmt"
-	"os"
 	"sync"
 	"testing"
 	"time"
 
 	toxiproxy "github.com/Shopify/toxiproxy/client"
-	"github.com/rcrowley/go-metrics"
 )
 
 const TestBatchSize = 1000
@@ -147,9 +145,6 @@ func testProducingMessages(t *testing.T, config *Config) {
 		}
 	}
 	safeClose(t, producer)
-
-	// Validate producer metrics before using the consumer minus the offset request
-	validateMetrics(t, client)
 
 	master, err := NewConsumerFromClient(client)
 	if err != nil {
@@ -291,17 +286,6 @@ func BenchmarkProducerMediumSnappy(b *testing.B) {
 func benchmarkProducer(b *testing.B, conf *Config, topic string, value Encoder) {
 	setupFunctionalTest(b)
 	defer teardownFunctionalTest(b)
-
-	metricsDisable := os.Getenv("METRICS_DISABLE")
-	if metricsDisable != "" {
-		previousUseNilMetrics := metrics.UseNilMetrics
-		Logger.Println("Disabling metrics using no-op implementation")
-		metrics.UseNilMetrics = true
-		// Restore previous setting
-		defer func() {
-			metrics.UseNilMetrics = previousUseNilMetrics
-		}()
-	}
 
 	producer, err := NewAsyncProducer(kafkaBrokers, conf)
 	if err != nil {
